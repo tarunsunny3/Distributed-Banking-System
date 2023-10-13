@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package main;
+option go_package = "banking/branch";
+message Branch {
+  int32 id = 1;
+  float balance = 2;
+}
+
+service BranchService {
+  rpc Withdraw(WithdrawRequest) returns (WithdrawResponse);
+  rpc QueryBalance(QueryBalanceRequest) returns (QueryBalanceResponse);
+  rpc Deposit(DepositRequest) returns (DepositResponse);
+  rpc PropagateWithdraw(PropagateWithdrawRequest) returns (PropagateWithdrawResponse);
+  rpc PropagateDeposit(PropagateDepositRequest) returns (PropagateDepositResponse);
+}
+
+message BranchRequest {
+  int32 id = 1;
+}
+
+message WithdrawRequest {
+  float amount = 2;
+}
+
+message WithdrawResponse {
+  float new_balance = 1;
+}
+
+message QueryBalanceRequest {
+  int32 customer_id = 1;
+}
+
+message QueryBalanceResponse {
+  float balance = 1;
+}
+
+message DepositRequest {
+  float amount = 2;
+}
+
+message DepositResponse {
+  float new_balance = 1;
+}
+message PropagateWithdrawRequest {
+  float balance = 1;
+}
+message PropagateWithdrawResponse{
+  bool success = 1;
+}
+message PropagateDepositRequest {
+  float balance = 1;
+}
+message PropagateDepositResponse {
+  bool success = 1;
+}
