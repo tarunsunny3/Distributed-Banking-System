@@ -5,32 +5,33 @@ import (
 
 	"branch_service"
 	"branch_service/branch"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// func readBranchDataFromFile(filename string) ([]*branch.Branch, error) {
-// 	var data []
+var stopSignal chan struct{}
 
-// 	// Read JSON file and populate 'data' with branch information
-// 	fileContents, err := os.ReadFile(filename)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("error reading branch data file: %v", err)
-// 	}
+func startServers(ctx context.Context) {
+	// Your server startup code here
 
-// 	err = json.Unmarshal(fileContents, &data)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("error unmarshaling branch data: %v", err)
-// 	}
+	// Block until a stop signal is received or a context cancellation
+	select {
+	case <-ctx.Done():
+		// Clean up and exit
+	case <-stopSignal:
+		// Stop signal received, clean up and exit
+	}
+}
 
-//		return data, nil
-//	}
 func readBranchDataFromFile(filename string) ([]*branch.Branch, error) {
 	var data []map[string]interface{}
 
@@ -80,7 +81,12 @@ func createBranchClient(address string) (branch.BranchServiceClient, error) {
 func main() {
 	// Read branch data from JSON file
 	log.SetOutput(os.Stdout)
-	branchData, err := readBranchDataFromFile("input_data.json")
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: programName filename")
+		return
+	}
+	inputFilename := os.Args[1]
+	branchData, err := readBranchDataFromFile(inputFilename)
 	fmt.Print(branchData)
 	if err != nil {
 		log.Fatalf("Error reading branch data: %v", err)
@@ -90,6 +96,13 @@ func main() {
 	branchClients := make(map[int32]branch.BranchServiceClient)
 	// Use a wait group to ensure all servers and clients are initialized
 	var wg sync.WaitGroup
+
+	// Initialize the stopSignal channel
+	stopSignal = make(chan struct{})
+
+	// Create a context with a cancel function
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // Ensure that the context is canceled when the program exits
 
 	for _, data := range branchData {
 		wg.Add(1) // Increment the wait group counter
@@ -117,14 +130,9 @@ func main() {
 		// Increment the port for the next branch server
 		port++
 	}
-	// log.Printf("Finished spinning up servers and now waiting wg.Wait()\n")
 	// Wait for all branch servers and clients to be initialized
 	wg.Wait()
 
-	// All goroutines have completed at this point
-	// fmt.Println("All goroutines have completed.")
-
-	// log.Printf("Branch servers is %#v\n", branchServers)
 	// Register peers and establish connections between branches
 	for id, server := range branchServers {
 		for peerID, client := range branchClients {
@@ -134,6 +142,18 @@ func main() {
 		}
 	}
 
+	// Wait for an interrupt signal (e.g., Ctrl+C) to cancel the context
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	<-c
+
+	// Send the stop signal to stop the servers gracefully
+	if stopSignal != nil {
+		close(stopSignal)
+	}
+
+	// Wait for servers to clean up and exit
+	<-ctx.Done()
 	// Block to keep the servers running
 	select {}
 }

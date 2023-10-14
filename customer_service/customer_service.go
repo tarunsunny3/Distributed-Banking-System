@@ -10,6 +10,7 @@ import (
 	"branch_service/branch"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type Customer struct {
@@ -35,27 +36,31 @@ type OutputData struct {
 
 func main() {
 	// Read customer data from JSON file
-	customerData, err := readCustomerDataFromFile("../input_data.json")
-	if err != nil {
-		log.Fatalf("Error reading customer data: %v", err)
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: programName filename")
+		return
 	}
-	// log.Print(customerData)
-
+	inputFilename := os.Args[1]
+	customerData, err := readCustomerDataFromFile(inputFilename)
+	if err != nil {
+		log.Fatalf("Error reading customer data from file %s : %v", inputFilename, err)
+	}
 	// Create a map to store customer clients
 	customerClients := make(map[int]*branch.BranchServiceClient)
-	outputFilename := "output.txt"
+	outputFilename := "../output.json"
 	// Open the output file in append mode
-	outputFile, err := os.OpenFile(outputFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	outputFile, err := os.OpenFile(outputFilename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		log.Printf("Error opening output file: %v", err)
 		return
 	}
 	defer outputFile.Close()
-	// Use a wait group to ensure all client connections are established
-	// var wg sync.WaitGroup
+
+	encoder := json.NewEncoder(outputFile)
+	outputFile.WriteString("[") // Add the '[' at the beginning
 
 	// Connect to branch servers and establish client connections
-	for _, customer := range customerData {
+	for i, customer := range customerData {
 
 		// Get the customer's ID
 		customerID := customer.ID
@@ -85,25 +90,17 @@ func main() {
 			Recv: results,
 		}
 
-		// Serialize the outputData as JSON and print it
-		outputJSON, err := json.Marshal(outputData)
-		if err != nil {
-			log.Printf("Error marshaling output data for customer %d: %v", customerID, err)
+		// Use the JSON encoder to write the outputData to the output file
+		if err := encoder.Encode(outputData); err != nil {
+			log.Printf("Error encoding and writing output data for customer %d: %v", customerID, err)
 			return
 		}
-
-		// Write the JSON to the output file
-		_, err = outputFile.WriteString(string(outputJSON) + "\n")
-		if err != nil {
-			log.Printf("Error writing output to file: %v", err)
-			return
+		// Add a comma after each object except the last one
+		if i < len(customerData)-1 {
+			outputFile.WriteString(",")
 		}
-
-		// }(customer)
 	}
-
-	// Wait for all customer goroutines to complete
-	// wg.Wait()
+	outputFile.WriteString("]")
 }
 func readCustomerDataFromFile(filename string) ([]Customer, error) {
 	var data []map[string]interface{}
@@ -166,9 +163,9 @@ func readCustomerDataFromFile(filename string) ([]Customer, error) {
 
 func createBranchClient(address string) (*branch.BranchServiceClient, error) {
 	// Create a gRPC connection to the branch server
-	conn, err := grpc.Dial(address, grpc.WithInsecure())
+	conn, err := grpc.Dial(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return nil, fmt.Errorf("Failed to connect to branch server: %v", err)
+		return nil, fmt.Errorf("failed to connect to branch server: %v", err)
 	}
 
 	// Create a branch client
@@ -184,7 +181,6 @@ func processCustomerEvent(client branch.BranchServiceClient, customerID int, eve
 	switch event.Interface {
 	case "query":
 		// Process query event
-		log.Printf("Customer ID is %d and type = QUERY\n", customerID)
 		queryResponse, err := client.QueryBalance(context.Background(), &branch.QueryBalanceRequest{})
 		if err != nil {
 			log.Printf("Error querying balance for customer %d: %v", customerID, err)
@@ -194,9 +190,7 @@ func processCustomerEvent(client branch.BranchServiceClient, customerID int, eve
 
 	case "deposit":
 		// Process deposit event
-		log.Printf("Customer ID is %d and type = DEPOSIT\n", customerID)
-		depositResponse, err := client.Deposit(context.Background(), &branch.DepositRequest{Amount: float32(event.Money)})
-		log.Printf("Deposit response is %.2f\n", depositResponse.NewBalance)
+		_, err := client.Deposit(context.Background(), &branch.DepositRequest{Amount: float32(event.Money)})
 		if err != nil {
 			log.Printf("Error depositing money for customer %d: %v", customerID, err)
 			return OutputEvent{Interface: "deposit", Result: "error"}
@@ -205,9 +199,7 @@ func processCustomerEvent(client branch.BranchServiceClient, customerID int, eve
 
 	case "withdraw":
 		// Process withdraw event
-		log.Printf("Customer ID is %d and type = WITHDRAW\n", customerID)
-		withdrawResponse, err := client.Withdraw(context.Background(), &branch.WithdrawRequest{Amount: float32(event.Money)})
-		log.Printf("Withdraw response is %.2f\n", withdrawResponse.NewBalance)
+		_, err := client.Withdraw(context.Background(), &branch.WithdrawRequest{Amount: float32(event.Money)})
 		if err != nil {
 			log.Printf("Error withdrawing money for customer %d: %v", customerID, err)
 			return OutputEvent{Interface: "withdraw", Result: "error"}

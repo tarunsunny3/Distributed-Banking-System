@@ -61,8 +61,6 @@ func (s *BranchServer) Deposit(ctx context.Context, request *branch.DepositReque
 		})
 		if err != nil || !response.Success {
 			log.Printf("Failed to propagate withdrawal to peer %d: %v", peerID, err)
-		} else {
-			log.Printf("Propagated to peer %d successfully\n", peerID)
 		}
 	}
 	// Return the updated balance
@@ -86,8 +84,6 @@ func (s *BranchServer) Withdraw(ctx context.Context, request *branch.WithdrawReq
 		})
 		if err != nil || !response.Success {
 			log.Printf("Failed to propagate withdrawal to peer %d: %v", peerID, err)
-		} else {
-			log.Printf("Propagated to peer %d successfully\n", peerID)
 		}
 	}
 	return &branch.WithdrawResponse{
@@ -104,7 +100,7 @@ func (s *BranchServer) StartBranchServer() {
 		server := grpc.NewServer()
 		branch.RegisterBranchServiceServer(server, s)
 
-		log.Printf("Branch server is running on port %d...\n", s.port)
+		// log.Printf("Branch server is running on port %d...\n", s.port)
 		if err := server.Serve(listen); err != nil {
 			log.Fatalf("Failed to serve branch server: %v", err)
 		}
