@@ -54,23 +54,28 @@ There are three main code files which cover the entire functionality
 
     First step is to run start_branch_servers.go, it expects the input
     data file name to be the **command line argument**
-
+    
+    [Link to input_data.json](input_data.json)
+    
     **Eg usage:**
     ```
-    go run start_branch_servers.go inputData.json
+    go run start_branch_servers.go input_data.json
     ```
 
     In the second terminal tab, run the customers
   ```
     cd customer_service
 
-    go run customer_service.go ../inputData.json
+    go run customer_service.go ../input_data.json
 ```
 **Results**
 
 All the events of the customer will be processed and the ‘**Withdraw’**
-Operation will withdraw the amount from one branch and then this branch
-propgates this transaction to all its peer branches using
+operation will withdraw the amount from one branch and then this branch
+propagates this transaction to all its peer branches using
 Propagate_Withdraw method, similarly the ‘**Deposit’** operation is
 carried out. The ‘**query’** type returns the current balance present in
 that branch.
+
+[Link to output.json](output.json)
+
