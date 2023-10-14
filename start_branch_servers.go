@@ -5,32 +5,15 @@ import (
 
 	"branch_service"
 	"branch_service/branch"
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
-
-var stopSignal chan struct{}
-
-func startServers(ctx context.Context) {
-	// Your server startup code here
-
-	// Block until a stop signal is received or a context cancellation
-	select {
-	case <-ctx.Done():
-		// Clean up and exit
-	case <-stopSignal:
-		// Stop signal received, clean up and exit
-	}
-}
 
 func readBranchDataFromFile(filename string) ([]*branch.Branch, error) {
 	var data []map[string]interface{}
@@ -97,13 +80,6 @@ func main() {
 	// Use a wait group to ensure all servers and clients are initialized
 	var wg sync.WaitGroup
 
-	// Initialize the stopSignal channel
-	stopSignal = make(chan struct{})
-
-	// Create a context with a cancel function
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // Ensure that the context is canceled when the program exits
-
 	for _, data := range branchData {
 		wg.Add(1) // Increment the wait group counter
 		port := 8080 + data.Id - 1
@@ -142,18 +118,6 @@ func main() {
 		}
 	}
 
-	// Wait for an interrupt signal (e.g., Ctrl+C) to cancel the context
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	<-c
-
-	// Send the stop signal to stop the servers gracefully
-	if stopSignal != nil {
-		close(stopSignal)
-	}
-
-	// Wait for servers to clean up and exit
-	<-ctx.Done()
 	// Block to keep the servers running
 	select {}
 }
