@@ -19,14 +19,16 @@ type Customer struct {
 	Events []struct {
 		ID        int    `json:"id"`
 		Interface string `json:"interface"`
+		Branch    int    `json:"branch"`
 		Money     int    `json:"money,omitempty"`
 	} `json:"events"`
 }
 
 type OutputEvent struct {
 	Interface string `json:"interface"`
-	Result    string `json:"result"`
-	Money     int    `json:"money,omitempty"`
+	Branch    int    `json:"branch"`
+	Result    string `json:"result,omitempty"`
+	Balance   int    `json:"balance,omitempty"`
 }
 
 type OutputData struct {
@@ -46,7 +48,7 @@ func main() {
 		log.Fatalf("Error reading customer data from file %s : %v", inputFilename, err)
 	}
 	// Create a map to store customer clients
-	customerClients := make(map[int]*branch.BranchServiceClient)
+	// customerClients := make(map[int]*branch.BranchServiceClient)
 	outputFilename := "../output.json"
 	// Open the output file in append mode
 	outputFile, err := os.OpenFile(outputFilename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
@@ -60,45 +62,48 @@ func main() {
 	outputFile.WriteString("[") // Add the '[' at the beginning
 
 	// Connect to branch servers and establish client connections
-	for i, customer := range customerData {
+	for _, customer := range customerData {
 
 		// Get the customer's ID
 		customerID := customer.ID
 
-		// Get the address of the branch server corresponding to the customer's ID
-		address := fmt.Sprintf("localhost:%d", 8080+customerID-1)
-
-		// Create a gRPC connection to the branch server
-		client, err := createBranchClient(address)
-		if err != nil {
-			log.Fatalf("Error creating a branch client for customer %d: %v", customerID, err)
-		}
-		customerClients[customerID] = client
+		// customerClients[customerID] = client
 
 		// Process customer events and collect results
-		var results []OutputEvent
-
+		var lastWriteEventID int = -1
 		for _, event := range customer.Events {
-			result := processCustomerEvent(*client, customerID, event)
+			var results []OutputEvent
+			// Get the address of the branch server corresponding to the customer's ID
+			address := fmt.Sprintf("localhost:%d", 8080+event.Branch-1)
+			// log.Printf("Event branch is %d\n", event.Branch)
+			// // Create a gRPC connection to the branch server
+			client, err := createBranchClient(address)
+			if err != nil {
+				log.Fatalf("Error creating a branch client for customer %d: %v", customerID, err)
+			}
+
+			result := processCustomerEvent(*client, customerID, event, lastWriteEventID)
+			if event.Interface == "deposit" || event.Interface == "withdraw" {
+				lastWriteEventID = event.ID
+			}
 			log.Printf("result for customer %d and event id is %d, result %v\n", customer.ID, event.ID, result)
+			// Write the results in the specified format
 			results = append(results, result)
+			outputData := OutputData{
+				ID:   customerID,
+				Recv: results,
+			}
+
+			// Use the JSON encoder to write the outputData to the output file
+			if err := encoder.Encode(outputData); err != nil {
+				log.Printf("Error encoding and writing output data for customer %d: %v", customerID, err)
+				return
+			}
+			if event != customer.Events[len(customer.Events)-1] {
+				outputFile.WriteString(",")
+			}
 		}
 
-		// Write the results in the specified format
-		outputData := OutputData{
-			ID:   customerID,
-			Recv: results,
-		}
-
-		// Use the JSON encoder to write the outputData to the output file
-		if err := encoder.Encode(outputData); err != nil {
-			log.Printf("Error encoding and writing output data for customer %d: %v", customerID, err)
-			return
-		}
-		// Add a comma after each object except the last one
-		if i < len(customerData)-1 {
-			outputFile.WriteString(",")
-		}
 	}
 	outputFile.WriteString("]")
 }
@@ -125,6 +130,7 @@ func readCustomerDataFromFile(filename string) ([]Customer, error) {
 					var events []struct {
 						ID        int    `json:"id"`
 						Interface string `json:"interface"`
+						Branch    int    `json:"branch"`
 						Money     int    `json:"money,omitempty"`
 					}
 					if eventsData, ok := entry["events"].([]interface{}); ok {
@@ -134,13 +140,16 @@ func readCustomerDataFromFile(filename string) ([]Customer, error) {
 								eventID, _ := event["id"].(float64)
 								eventInterface, _ := event["interface"].(string)
 								eventMoney, _ := event["money"].(float64)
+								eventBranch, _ := event["branch"].(float64)
 								events = append(events, struct {
 									ID        int    `json:"id"`
 									Interface string `json:"interface"`
+									Branch    int    `json:"branch"`
 									Money     int    `json:"money,omitempty"`
 								}{
 									ID:        int(eventID),
 									Interface: eventInterface,
+									Branch:    int(eventBranch),
 									Money:     int(eventMoney),
 								})
 							}
@@ -176,35 +185,36 @@ func createBranchClient(address string) (*branch.BranchServiceClient, error) {
 func processCustomerEvent(client branch.BranchServiceClient, customerID int, event struct {
 	ID        int    `json:"id"`
 	Interface string `json:"interface"`
+	Branch    int    `json:"branch"`
 	Money     int    `json:"money,omitempty"`
-}) OutputEvent {
+}, lastWriteEventID int) OutputEvent {
 	switch event.Interface {
 	case "query":
 		// Process query event
-		queryResponse, err := client.QueryBalance(context.Background(), &branch.QueryBalanceRequest{})
+		queryResponse, err := client.QueryBalance(context.Background(), &branch.QueryBalanceRequest{LastWriteEventID: int32(lastWriteEventID)})
 		if err != nil {
 			log.Printf("Error querying balance for customer %d: %v", customerID, err)
-			return OutputEvent{Interface: "query", Result: "error"}
+			return OutputEvent{Interface: "query", Branch: event.Branch, Balance: 0}
 		}
-		return OutputEvent{Interface: "query", Result: "success", Money: int(queryResponse.Balance)}
+		return OutputEvent{Interface: "query", Branch: event.Branch, Balance: int(queryResponse.Balance)}
 
 	case "deposit":
 		// Process deposit event
-		_, err := client.Deposit(context.Background(), &branch.DepositRequest{Amount: float32(event.Money)})
+		_, err := client.Deposit(context.Background(), &branch.DepositRequest{Amount: float32(event.Money), WriteEventID: int32(event.ID)})
 		if err != nil {
 			log.Printf("Error depositing money for customer %d: %v", customerID, err)
 			return OutputEvent{Interface: "deposit", Result: "error"}
 		}
-		return OutputEvent{Interface: "deposit", Result: "success"}
+		return OutputEvent{Interface: "deposit", Branch: event.Branch, Result: "success"}
 
 	case "withdraw":
 		// Process withdraw event
-		_, err := client.Withdraw(context.Background(), &branch.WithdrawRequest{Amount: float32(event.Money)})
+		_, err := client.Withdraw(context.Background(), &branch.WithdrawRequest{Amount: float32(event.Money), WriteEventID: int32(event.ID)})
 		if err != nil {
 			log.Printf("Error withdrawing money for customer %d: %v", customerID, err)
 			return OutputEvent{Interface: "withdraw", Result: "error"}
 		}
-		return OutputEvent{Interface: "withdraw", Result: "success"}
+		return OutputEvent{Interface: "withdraw", Branch: event.Branch, Result: "success"}
 	}
 
 	log.Printf("Unknown event type for customer ID %d: %s\n", customerID, event.Interface)
