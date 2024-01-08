@@ -4,15 +4,11 @@
 
 **Problem Statement**
 
-Design and implement a distributed banking application usiing gRPC as
-the communication mechanism.
+Design and implement a distributed banking application usiing gRPC as the communication mechanism implementing a “read-your-writes” consistency mechanism.
 
 **Goal**
 
-The goal is to implement a distributed banking application which uses
-gRPC for the communication mechanism and it ensures that the replica of
-bank’s balance is maintained accross all its branches so that the
-availability is increased.
+The goal is to implement a distributed banking application that uses gRPC for the communication mechanism while ensuring a good level of consistency accross all the replicas. The idea is to implement “read-your-writes” consistency model and ensure consistency.
 
 **Setup**
 
@@ -68,14 +64,40 @@ There are three main code files which cover the entire functionality
 
     go run customer_service.go ../input_data.json
 ```
-**Results**
 
-All the events of the customer will be processed and the ‘**Withdraw’**
-operation will withdraw the amount from one branch and then this branch
-propagates this transaction to all its peer branches using
-Propagate_Withdraw method, similarly the ‘**Deposit’** operation is
-carried out. The ‘**query’** type returns the current balance present in
-that branch.
+I have implemented the “read-your-writes” consistency model by following the steps below:
 
-[Link to output.json](output.json)
+1.Event unique token generation:  When the customer initiates an event/transaction processing, this unique “token” which in my implementation is the unique ID of the current event is sent to the Write operation which is “DEPOSIT” or “WITHDRAW” operation of a branch.
+
+
+2.Token Propagation: The passed token from the customer process to the branch process will be used to send to the respective peer branches while sending the propagation requests. This way each branch process stores the information in a map called writeEventsReceived, and this is used to determine whether to block an incoming read request from the customer.
+
+
+The following code represents the part where the process blocks the read request from a customer until it knows that the previous write operation has managed to propagate to this current branch.
+
+```
+
+func (s *BranchServer) QueryBalance(ctx context.Context, request *branch.QueryBalanceRequest) (*branch.QueryBalanceResponse, error) {
+
+var lastWriteEventID int32 = request.LastWriteEventID
+
+if lastWriteEventID == -1 {
+// Return the current balance, since it's the first query
+// represented by EventID = -1
+return &branch.QueryBalanceResponse{
+Balance: s.Balance,
+}, nil
+}
+for !s.IsEventIDExists(lastWriteEventID) {
+time.Sleep(100 * time.Millisecond) // Wait for a short duration
+}
+
+// Return the current balance
+return &branch.QueryBalanceResponse{
+Balance: s.Balance,
+}, nil
+
+}
+
+```
 
